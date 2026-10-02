@@ -14,7 +14,7 @@ This is a versatile easing script that can be used in any production, featuring 
 
 ## Setup
 
-**Install.** Download a release, run the bundled installer, and restart After Effects. The panel appears under **Window ▸ Extensions ▸ Smoothio**. Unsigned panels need CEP `PlayerDebugMode` enabled.
+**Install.** Download a release, run the bundled installer, and restart After Effects. The panel appears under **Window ▸ Extensions ▸ Smoothio**. Releases are signed, so CEP `PlayerDebugMode` is not needed. Each release also ships a `.zxp` for ZXP installers.
 
 **Develop.** The panel is React and TypeScript built with webpack. Clone the repository, then:
 
@@ -23,6 +23,7 @@ This is a versatile easing script that can be used in any production, featuring 
 | `npm install` | install dependencies |
 | `npm run build` | production build |
 | `npm run dev` | development build, rebuilt on change |
+| `npm run package` | build and sign a distributable ZXP |
 
 For After Effects 2023 and later.
 

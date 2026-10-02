@@ -4,3 +4,5 @@ dist/
 .claude/
 *.log
 Release/
+certs/
+.package-staging/
