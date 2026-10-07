@@ -8,7 +8,7 @@
  *
  * 出力:
  *   Release/Smoothio-vX.Y.Z.zxp  … ZXP インストーラ / UPIA 用
- *   Release/vX.Y.Z/src/          … 同じ署名済みの中身を展開したもの（インストーラ bat がこれをコピーする）
+ *   Release/vX.Y.Z/com.smoothio/ … 同じ署名済みの中身を展開したもの（インストーラ bat がこれをコピーする）
  *
  * 署名済みなので PlayerDebugMode なしで読み込まれる。
  * そのかわり、署名後に中身を1ファイルでも足す・書き換えると CEP に読み込まれなくなる。
@@ -31,7 +31,7 @@ const CERT_DIR = path.join(ROOT, 'certs')
 const CERT_FILE = path.join(CERT_DIR, 'smoothio.p12')
 const CERT_PASS = process.env.SMOOTHIO_CERT_PASS
 const TSA_URL = process.env.SMOOTHIO_TSA_URL || 'http://timestamp.digicert.com'
-const EXT_DIR_NAME = 'src'   // the installer .bat looks for this folder
+const EXT_DIR_NAME = 'com.smoothio'
 const STAGING_ROOT = path.join(ROOT, '.package-staging')
 const STAGING_DIR = path.join(STAGING_ROOT, EXT_DIR_NAME)
 const RELEASE_DIR = path.join(ROOT, 'Release')
