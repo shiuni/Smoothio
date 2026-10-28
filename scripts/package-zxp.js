@@ -16,7 +16,8 @@
  * ZXPSignCmd は 4.1.3 以降が必要（それ以前は -tsa でクラッシュする）。
  * 場所は環境変数 ZXPSIGNCMD で指定できる（未指定なら ../../Tools/ZXP Tools/ZXPSignCmd.exe）。
  * 初回実行時に自己署名証明書 (certs/smoothio.p12) を自動生成します。
- * 証明書のパスワードは環境変数 SMOOTHIO_CERT_PASS で設定できます。
+ * 証明書のパスワードはリポジトリに置かない。環境変数 SMOOTHIO_CERT_PASS か
+ * certs/password.txt（certs/ は git 管理外）に書いておく。
  */
 
 const fs = require('fs')
@@ -29,7 +30,6 @@ const ROOT = path.resolve(__dirname, '..')
 const ZXPSIGNCMD = process.env.ZXPSIGNCMD || path.resolve(ROOT, '..', '..', 'Tools', 'ZXP Tools', 'ZXPSignCmd.exe')
 const CERT_DIR = path.join(ROOT, 'certs')
 const CERT_FILE = path.join(CERT_DIR, 'smoothio.p12')
-const CERT_PASS = process.env.SMOOTHIO_CERT_PASS
 const TSA_URL = process.env.SMOOTHIO_TSA_URL || 'http://timestamp.digicert.com'
 const EXT_DIR_NAME = 'com.smoothio'
 const STAGING_ROOT = path.join(ROOT, '.package-staging')
@@ -50,6 +50,15 @@ const INCLUDE = [
 
 // Never ship these — an extra file breaks the signature
 const SKIP = new Set(['node_modules', '.git', '.DS_Store', 'Thumbs.db', 'desktop.ini'])
+
+// The password never lives in the repo: take it from SMOOTHIO_CERT_PASS, or from
+// certs/password.txt (certs/ is git-ignored, like the .p12 next to it).
+function readCertPass() {
+  if (process.env.SMOOTHIO_CERT_PASS) return process.env.SMOOTHIO_CERT_PASS
+  const file = path.join(CERT_DIR, 'password.txt')
+  if (fs.existsSync(file)) return fs.readFileSync(file, 'utf8').trim()
+  throw new Error('Certificate password not set.\n   Set SMOOTHIO_CERT_PASS or write it to certs/password.txt.')
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,6 +112,7 @@ function main() {
   if (!fs.existsSync(ZXPSIGNCMD)) {
     throw new Error(`ZXPSignCmd not found: ${ZXPSIGNCMD}\n   Set ZXPSIGNCMD to ZXPSignCmd.exe 4.1.3 or later.`)
   }
+  const CERT_PASS = readCertPass()
 
   // Step 1: Build
   console.log('🔨 Building...')
