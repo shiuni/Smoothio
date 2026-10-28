@@ -113,7 +113,7 @@ function main() {
   if (!fs.existsSync(CERT_FILE)) {
     console.log('🔑 Creating self-signed certificate...')
     fs.mkdirSync(CERT_DIR, { recursive: true })
-    zxpSignCmd(['-selfSignedCert', 'JP', 'Tokyo', 'Smoothio', 'Smoothio', CERT_PASS, CERT_FILE, '-validityDays', '3650'])
+    zxpSignCmd(['-selfSignedCert', 'JP', 'Osaka', 'com.github.shiuni', 'Shiu', CERT_PASS, CERT_FILE, '-validityDays', '3650'])
     console.log(`   ✅ Certificate created: certs/smoothio.p12`)
     console.log('')
   } else {
