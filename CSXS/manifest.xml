@@ -3,12 +3,12 @@
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   ExtensionBundleId="com.smoothio"
   ExtensionBundleName="Smoothio"
-  ExtensionBundleVersion="1.1.2"
+  ExtensionBundleVersion="1.1.3"
   Version="12.0">
 
   <ExtensionList>
-    <Extension Id="com.smoothio.panel" Version="1.1.2"/>
-    <Extension Id="com.smoothio.settings" Version="1.1.2"/>
+    <Extension Id="com.smoothio.panel" Version="1.1.3"/>
+    <Extension Id="com.smoothio.settings" Version="1.1.3"/>
   </ExtensionList>
 
   <ExecutionEnvironment>
