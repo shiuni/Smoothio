@@ -140,6 +140,34 @@ function computeEasePair(lox, loy, lix, liy, dv, dt) {
   };
 }
 
+// Write only the side of keyframe `k` that belongs to the segment being eased
+// ('out' at the segment's start key, 'in' at its end key). The other side belongs
+// to the neighbouring segment, but setInterpolationTypeAtKey/setTemporalEaseAtKey
+// always write both sides (and setTemporalEaseAtKey forces both to BEZIER), so
+// easing 2→3 used to flatten 1→2's in-handle at key 2. Snapshot that side and put
+// it back: eases first, types last, so LINEAR/HOLD on the kept side survive.
+// `eases` null keeps the target side's current ease (used when making it LINEAR).
+function setKeySide(prop, k, side, type, eases) {
+  var isOut = (side === 'out');
+  var keepType = isOut ? prop.keyInInterpolationType(k) : prop.keyOutInterpolationType(k);
+  var keepEase = isOut ? prop.keyInTemporalEase(k) : prop.keyOutTemporalEase(k);
+  if (!eases) eases = isOut ? prop.keyOutTemporalEase(k) : prop.keyInTemporalEase(k);
+
+  // Continuous / auto-bezier keys tie both sides' speeds together, which would
+  // drag the neighbour's ease along with ours. Untie them first.
+  try { prop.setTemporalAutoBezierAtKey(k, false); } catch (e) {}
+  try { prop.setTemporalContinuousAtKey(k, false); } catch (e) {}
+
+  try {
+    if (isOut) prop.setTemporalEaseAtKey(k, keepEase, eases);
+    else       prop.setTemporalEaseAtKey(k, eases, keepEase);
+  } catch (e) {}
+  try {
+    if (isOut) prop.setInterpolationTypeAtKey(k, keepType, type);
+    else       prop.setInterpolationTypeAtKey(k, type, keepType);
+  } catch (e) {}
+}
+
 // Apply ease to one keyframe segment [kA, kB].
 // segA, segB: this ease-segment's anchor positions in global [0,1] canvas space.
 // Handles are in global space and get transformed to segment-local space here.
@@ -167,13 +195,10 @@ function applySegment(prop, kA, kB, handle, segA, segB) {
 
   // Linear ease: handles lie on the diagonal (loy≈lox, liy≈lix) → use LINEAR interpolation
   if (Math.abs(loy - lox) < 0.02 && Math.abs(liy - lix) < 0.02) {
-    try { prop.setInterpolationTypeAtKey(kA, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR); } catch (e) {}
-    try { prop.setInterpolationTypeAtKey(kB, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR); } catch (e) {}
+    setKeySide(prop, kA, 'out', KeyframeInterpolationType.LINEAR, null);
+    setKeySide(prop, kB, 'in',  KeyframeInterpolationType.LINEAR, null);
     return;
   }
-
-  try { prop.setInterpolationTypeAtKey(kA, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER); } catch (e) {}
-  try { prop.setInterpolationTypeAtKey(kB, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER); } catch (e) {}
 
   var vA = prop.keyValue(kA);
   var vB = prop.keyValue(kB);
@@ -203,8 +228,8 @@ function applySegment(prop, kA, kB, handle, segA, segB) {
     }
   }
 
-  try { prop.setTemporalEaseAtKey(kA, prop.keyInTemporalEase(kA), outEases); } catch (e2) {}
-  try { prop.setTemporalEaseAtKey(kB, inEases, prop.keyOutTemporalEase(kB)); } catch (e2) {}
+  setKeySide(prop, kA, 'out', KeyframeInterpolationType.BEZIER, outEases);
+  setKeySide(prop, kB, 'in',  KeyframeInterpolationType.BEZIER, inEases);
 }
 
 // Insert midpoint keyframes between kA and kB, then apply ease per sub-segment.
