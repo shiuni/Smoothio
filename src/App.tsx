@@ -13,7 +13,9 @@ import {
   curveToTextBox1,
   curveToTextBox2,
   invertCurve,
+  isValidCurve,
   removeMidPoint,
+  sanitizeCurve,
   textBoxesToCurve,
 } from './utils/curveUtils';
 import { callHost, isInCEP, requestOpenExtension } from './utils/cepBridge';
@@ -25,6 +27,7 @@ import {
   loadPresetsFromFile,
   mergePresets,
   newPresetId,
+  normalizePresets,
   openFileDialog,
   openSaveDialog,
   readSettingsFile,
@@ -32,40 +35,66 @@ import {
   watchSettingsFile,
   writeSettingsFile,
 } from './utils/fileUtils';
+import { LanguageContext, defaultLang, resolveLang } from './i18n/LanguageContext';
+import { STRINGS, hostError } from './i18n/strings';
 
 const SETTINGS_EXTENSION_ID = 'com.smoothio.settings';
 
 const STORAGE_PRESETS = 'smoothio_presets';
 const STORAGE_SETTINGS = 'smoothio_settings';
-const STORAGE_CURVE_SYNC = 'smoothio_curve_sync';
+// Set while the canonical presets file is behind localStorage (its last write failed).
+const STORAGE_PRESETS_UNSAVED = 'smoothio_presets_unsaved';
 
 const DEFAULT_SETTINGS: AppSettings = {
+  language: defaultLang(),
   presetSize: 60,
   presetSaveLocation: getDefaultSaveLocation(),
   uiLayout: 'auto',
 };
 
+/** Fill missing fields (e.g. from an older settings file) and validate the language. */
+function withDefaults(s: Partial<AppSettings>): AppSettings {
+  return { ...DEFAULT_SETTINGS, ...s, language: resolveLang(s.language) };
+}
+
 function loadSettings(): AppSettings {
   // Prefer the shared settings file (kept in sync with the Settings window in CEP),
   // fall back to localStorage for browser/dev.
   const f = readSettingsFile();
-  if (f) return { ...DEFAULT_SETTINGS, ...f.settings };
-  try { const r = localStorage.getItem(STORAGE_SETTINGS); if (r) return { ...DEFAULT_SETTINGS, ...JSON.parse(r) }; } catch {}
+  if (f) return withDefaults(f.settings);
+  try { const r = localStorage.getItem(STORAGE_SETTINGS); if (r) return withDefaults(JSON.parse(r)); } catch {}
   return { ...DEFAULT_SETTINGS };
 }
 function saveSettings(s: AppSettings) { localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(s)); }
 
-/** Try canonical file first, fall back to localStorage. */
+function readLocalPresets(): Preset[] | null {
+  try {
+    const r = localStorage.getItem(STORAGE_PRESETS);
+    if (r) { const v = JSON.parse(r); if (Array.isArray(v)) return normalizePresets(v).presets; }
+  } catch {}
+  return null;
+}
+
+function hasUnsavedPresets(): boolean {
+  try { return !!localStorage.getItem(STORAGE_PRESETS_UNSAVED); } catch { return false; }
+}
+
+/**
+ * Try canonical file first, fall back to localStorage — unless the last write to
+ * the file failed, in which case localStorage holds the newer list.
+ */
 function initPresets(): Preset[] {
+  const local = readLocalPresets();
+  if (local && hasUnsavedPresets()) return local;
   const file = loadPresetsFromCanonical();
   if (file.ok && file.data) return file.data.presets.map((p, i) => ({ ...p, order: i }));
-  try { const r = localStorage.getItem(STORAGE_PRESETS); if (r) return JSON.parse(r); } catch {}
-  return [];
+  return local ?? [];
 }
 
 interface PendingImport {
   data: ExportedPresets;
   originalName: string;
+  dropped: number;
 }
 
 export const App: React.FC = () => {
@@ -75,6 +104,7 @@ export const App: React.FC = () => {
   const [separateDimensions, setSeparateDimensions] = useState(false);
   const [presets, setPresets] = useState<Preset[]>(initPresets);
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
+  const t = STRINGS[settings.language];
   const [showSave, setShowSave] = useState(false);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -85,48 +115,33 @@ export const App: React.FC = () => {
 
   const dividerRef   = useRef<{ startX: number; startY: number; startPos: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const popoutRef    = useRef<Window | null>(null);
   const didMountRef  = useRef(false);
   const lastSettingsTsRef = useRef(0); // last settings.json ts this panel wrote/applied
 
-  // Auto-persist to localStorage + canonical file on every presets change (skip first render)
+  // Auto-persist to localStorage + canonical file on every presets change. The
+  // first render is skipped unless last session's file write failed, so that
+  // write is retried now. A failed write is shown and flagged, so the next
+  // launch reads localStorage instead of the stale file.
   useEffect(() => {
-    if (!didMountRef.current) { didMountRef.current = true; return; }
-    try { localStorage.setItem(STORAGE_PRESETS, JSON.stringify(presets)); } catch {}
-    autoSaveToCanonical(presets);
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      if (!hasUnsavedPresets()) return;
+    } else {
+      try { localStorage.setItem(STORAGE_PRESETS, JSON.stringify(presets)); } catch {}
+    }
+    if (!isInCEP()) return;
+    const res = autoSaveToCanonical(presets);
+    try {
+      if (res.ok) localStorage.removeItem(STORAGE_PRESETS_UNSAVED);
+      else localStorage.setItem(STORAGE_PRESETS_UNSAVED, '1');
+    } catch {}
+    if (!res.ok) showStatus(t.presetSaveFailed(res.error ?? ''));
   }, [presets]);
-
-  // Sync to popout via localStorage (storage event fires only in other windows).
-  // localStorage writes are synchronous, and this runs on every mouse move while
-  // the curve is dragged — so skip it entirely when no popout is listening. The
-  // popout is seeded with the current curve in handleOpenPopout, so it still
-  // opens with the right values.
-  const syncCurveToPopout = useCallback((c: CurveData) => {
-    const w = popoutRef.current;
-    if (!w || w.closed) return;
-    localStorage.setItem(STORAGE_CURVE_SYNC, JSON.stringify({ curve: c, ts: Date.now() }));
-  }, []);
 
   const setCurve = useCallback((c: CurveData) => {
     setCurveRaw(c);
     setText1(curveToTextBox1(c));
     setText2(curveToTextBox2(c));
-    syncCurveToPopout(c);
-  }, [syncCurveToPopout]);
-
-  // Listen for curve changes FROM the popout window
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== STORAGE_CURVE_SYNC || !e.newValue) return;
-      try {
-        const { curve: c } = JSON.parse(e.newValue);
-        setCurveRaw(c);
-        setText1(curveToTextBox1(c));
-        setText2(curveToTextBox2(c));
-      } catch {}
-    };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   const handleAdd = () => setCurve(addMidPoint(curve));
@@ -137,12 +152,12 @@ export const App: React.FC = () => {
   const onText1Change = (val: string) => {
     setText1(val);
     const p = textBoxesToCurve(val, text2);
-    if (p) { setCurveRaw(p); syncCurveToPopout(p); }
+    if (p) setCurveRaw(p);
   };
   const onText2Change = (val: string) => {
     setText2(val);
     const p = textBoxesToCurve(text1, val);
-    if (p) { setCurveRaw(p); syncCurveToPopout(p); }
+    if (p) setCurveRaw(p);
   };
 
   const showStatus = (msg: string) => { setStatus(msg); setTimeout(() => setStatus(''), 3000); };
@@ -151,8 +166,9 @@ export const App: React.FC = () => {
     if (!isInCEP()) return;
     try {
       const r = await callHost<{ ok: boolean; curve?: CurveData; error?: string }>('smoothio_importEase');
-      if (r.ok && r.curve) setCurve(r.curve);
-    } catch (e) {}
+      if (r.ok && isValidCurve(r.curve)) setCurve(sanitizeCurve(r.curve));
+      else showStatus(r.error ? hostError(t, r.error) : t.importEaseFailed);
+    } catch (e) { showStatus(String(e)); }
   };
 
   const handleApply = async () => {
@@ -161,25 +177,12 @@ export const App: React.FC = () => {
       const r = await callHost<{ ok: boolean; error?: string }>(
         'smoothio_applyEasing', curve, separateDimensions
       );
-      if (!r.ok) showStatus(r.error || 'Apply failed');
+      if (!r.ok) showStatus(r.error ? hostError(t, r.error) : t.applyFailed);
     } catch (e) { showStatus(String(e)); }
   };
 
   const handleResetEase = () => {
     setCurve(createDefaultCurve());
-  };
-
-  const handleOpenPopout = () => {
-    if (popoutRef.current && !popoutRef.current.closed) {
-      try { popoutRef.current.focus(); } catch {}
-      return;
-    }
-    popoutRef.current = null;
-    localStorage.setItem(STORAGE_CURVE_SYNC, JSON.stringify({ curve, ts: Date.now() }));
-    // Build absolute URL from current page location so it works in CEP file:// context
-    const popoutUrl = window.location.href.replace(/[^/]*$/, 'popout.html');
-    const w = window.open(popoutUrl, 'smoothio-popout', 'width=580,height=620,resizable=yes');
-    popoutRef.current = w;
   };
 
   const handleSavePreset = (name: string) => {
@@ -203,7 +206,7 @@ export const App: React.FC = () => {
     if (!savedPath) return;
     const res = savePresetsToFile(presets, savedPath);
     const filename = savedPath.split(/[\\/]/).pop() ?? savedPath;
-    showStatus(res.ok ? `Exported: ${filename}` : `Export error: ${res.error}`);
+    showStatus(res.ok ? t.exported(filename) : t.exportError(res.error ?? ''));
   };
 
   // ── Import (two-step: file dialog → mode dialog → merge) ────────────────
@@ -212,17 +215,17 @@ export const App: React.FC = () => {
     if (!filePath) return;
     const res = loadPresetsFromFile(filePath);
     if (!res.ok || !res.data) {
-      showStatus('Import error: invalid file');
+      showStatus(t.importInvalidFile);
       return;
     }
-    setPendingImport({ data: res.data, originalName: basename(filePath) });
+    setPendingImport({ data: res.data, originalName: basename(filePath), dropped: res.dropped ?? 0 });
   };
 
   const handleImportConfirm = (mode: ImportMode) => {
     if (!pendingImport) return;
     const next = mergePresets(presets, pendingImport.data.presets, mode);
     setPresets(next);
-    showStatus(`Imported: ${pendingImport.originalName}`);
+    showStatus(t.imported(pendingImport.originalName, pendingImport.dropped));
     setPendingImport(null);
   };
 
@@ -258,7 +261,7 @@ export const App: React.FC = () => {
       if (!f) return false;
       if (f.ts === lastSettingsTsRef.current) return true; // our own write, or no change
       lastSettingsTsRef.current = f.ts;
-      const merged = { ...DEFAULT_SETTINGS, ...f.settings };
+      const merged = withDefaults(f.settings);
       setSettings(merged);
       saveSettings(merged);
       if (f.command === 'deleteAllPresets') {
@@ -334,6 +337,7 @@ export const App: React.FC = () => {
   }, [vertical]);
 
   return (
+    <LanguageContext.Provider value={t}>
     <div
       ref={containerRef}
       style={{
@@ -385,14 +389,14 @@ export const App: React.FC = () => {
           value={text1}
           onChange={e => onText1Change(e.target.value)}
           style={inputStyle}
-          placeholder="Curve values…"
+          placeholder={t.curveValuesPlaceholder}
           spellCheck={false}
         />
         <input
           value={text2}
           onChange={e => onText2Change(e.target.value)}
           style={{ ...inputStyle, borderTop: '1px solid #111' }}
-          placeholder="Midpoint values…"
+          placeholder={t.midpointValuesPlaceholder}
           spellCheck={false}
         />
 
@@ -413,7 +417,7 @@ export const App: React.FC = () => {
             fontSize: 15, fontWeight: 700, letterSpacing: 1,
             opacity: status ? 0 : 1, transition: 'opacity 0.25s',
             pointerEvents: 'none',
-          }}>APPLY</span>
+          }}>{t.apply}</span>
           <span style={{
             position: 'absolute', inset: '0 10px',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -481,6 +485,7 @@ export const App: React.FC = () => {
         />
       )}
     </div>
+    </LanguageContext.Provider>
   );
 };
 

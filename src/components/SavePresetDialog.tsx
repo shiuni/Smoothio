@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CurveData } from '../types';
 import { buildSvgPath } from '../utils/curveUtils';
+import { useT } from '../i18n/LanguageContext';
 
 interface Props {
   curve: CurveData;
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export const SavePresetDialog: React.FC<Props> = ({ curve, onSave, onCancel }) => {
+  const t = useT();
   const [name, setName] = useState('Ease01');
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -23,7 +25,10 @@ export const SavePresetDialog: React.FC<Props> = ({ curve, onSave, onCancel }) =
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onCancel]);
 
-  const w = 200;
+  // The preview spans the dialog's content width (minWidth 320 − 2×24 padding)
+  // and scales with it via the viewBox; a fixed 200px left an empty strip to
+  // its right inside the full-width frame.
+  const w = 272;
   const h = 180;
   const pad = 12;
 
@@ -47,7 +52,7 @@ export const SavePresetDialog: React.FC<Props> = ({ curve, onSave, onCancel }) =
     <div style={overlay}>
       <div style={modal}>
         <h2 style={{ color: '#e0e0e0', fontSize: 20, fontWeight: 600, marginBottom: 16 }}>
-          Save Preset
+          {t.savePreset}
         </h2>
 
         {/* Preview */}
@@ -57,7 +62,7 @@ export const SavePresetDialog: React.FC<Props> = ({ curve, onSave, onCancel }) =
             marginBottom: 16, overflow: 'hidden',
           }}
         >
-          <svg width={w} height={h} style={{ display: 'block' }}>
+          <svg viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', width: '100%', height: 'auto' }}>
             {[0, 0.25, 0.5, 0.75, 1].map(t => (
               <g key={t}>
                 <line x1={pad + t * (w - 2 * pad)} y1={pad}
@@ -79,7 +84,7 @@ export const SavePresetDialog: React.FC<Props> = ({ curve, onSave, onCancel }) =
         {/* Name input */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
           <label style={{ color: '#ccc', fontSize: 14, whiteSpace: 'nowrap' }}>
-            Preset Name
+            {t.presetName}
           </label>
           <input
             ref={inputRef}
@@ -106,10 +111,10 @@ export const SavePresetDialog: React.FC<Props> = ({ curve, onSave, onCancel }) =
             onClick={onCancel}
             style={{ ...dialogBtn, background: '#2a2a2a', border: '1px solid #333', color: '#ccc' }}
           >
-            Cancel
+            {t.cancel}
           </button>
           <button onClick={submit} style={{ ...dialogBtn, background: '#0077ff' }}>
-            Save
+            {t.save}
           </button>
         </div>
       </div>

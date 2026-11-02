@@ -7,7 +7,6 @@ module.exports = (env, argv) => {
   return {
     entry: {
       main: './src/index.tsx',
-      popout: './src/popout.tsx',
       settings: './src/settings.tsx',
     },
     output: {
@@ -40,12 +39,6 @@ module.exports = (env, argv) => {
         template: './public/index.html',
         filename: 'index.html',
         chunks: ['main'],
-        inject: 'body',
-      }),
-      new HtmlWebpackPlugin({
-        template: './public/popout.html',
-        filename: 'popout.html',
-        chunks: ['popout'],
         inject: 'body',
       }),
       new HtmlWebpackPlugin({

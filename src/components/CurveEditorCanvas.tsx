@@ -7,7 +7,7 @@ import React, {
   useState,
 } from 'react';
 import { CurveData, DragState, DragTarget, Point } from '../types';
-import { buildSvgPath, cloneCurve, getAnchorPoints } from '../utils/curveUtils';
+import { MID_GAP, VALUE_LIMIT, buildSvgPath, cloneCurve, getAnchorPoints } from '../utils/curveUtils';
 
 interface Props {
   curve: CurveData;
@@ -23,13 +23,29 @@ const PADDING = 12;
 // pad on each side (≈1.04×), center-scaled, so the curve nearly fills the box.
 const X_RANGE_MIN = 1.04;
 
+// Upper bound on grid lines per axis; past it the grid step widens ×5.
+const MAX_GRID_LINES = 200;
+
+function clampY(y: number): number {
+  return Math.min(Math.max(y, -VALUE_LIMIT), VALUE_LIMIT);
+}
+
 // Ease handles are constrained in X to their segment's anchor range
-// (Y is intentionally unconstrained; midpoints are exempt from both).
+// (Y is intentionally unconstrained, up to ±VALUE_LIMIT).
 function clampHandleX(curve: CurveData, segIndex: number, p: Point): Point {
   const anchors = getAnchorPoints(curve);
   const lo = Math.min(anchors[segIndex].x, anchors[segIndex + 1].x);
   const hi = Math.max(anchors[segIndex].x, anchors[segIndex + 1].x);
-  return { x: Math.min(Math.max(p.x, lo), hi), y: p.y };
+  return { x: Math.min(Math.max(p.x, lo), hi), y: clampY(p.y) };
+}
+
+// Midpoints become keyframe times, so a midpoint stays strictly between its
+// neighbouring anchors: on or past one, its key would overwrite that key.
+function clampMidpoint(curve: CurveData, index: number, p: Point): Point {
+  const anchors = getAnchorPoints(curve);
+  const lo = anchors[index].x + MID_GAP;
+  const hi = anchors[index + 2].x - MID_GAP;
+  return { x: Math.min(Math.max(p.x, lo), hi), y: clampY(p.y) };
 }
 
 function computeTargetViewY(curve: CurveData): { min: number; max: number } {
@@ -203,8 +219,11 @@ export const CurveEditorCanvas: React.FC<Props> = ({
       if (target.type === 'midpoint')    startValue = { ...curve.midPoints[target.index] };
       else if (target.type === 'handleOut') startValue = { ...curve.handles[target.segIndex].out };
       else                                  startValue = { ...curve.handles[target.segIndex].in };
+      const startHandles = target.type === 'midpoint'
+        ? { in: { ...curve.handles[target.index].in }, out: { ...curve.handles[target.index + 1].out } }
+        : undefined;
       dragScaleRef.current = scaleRef.current;
-      setDrag({ target, startSvgPos: svgPos, startValue });
+      setDrag({ target, startSvgPos: svgPos, startValue, startHandles });
       return;
     }
 
@@ -231,7 +250,18 @@ export const CurveEditorCanvas: React.FC<Props> = ({
 
       const next = cloneCurve(curveRef.current);
       const { target } = drag;
-      if (target.type === 'midpoint')    next.midPoints[target.index]         = newVal;
+      if (target.type === 'midpoint') {
+        // The midpoint carries its own handles (segment i's in, segment i+1's out)
+        // by the same offset it actually moved; the handles stay clamped to
+        // their segment's X range.
+        const mp = clampMidpoint(next, target.index, newVal);
+        next.midPoints[target.index] = mp;
+        const mdx = mp.x - drag.startValue.x;
+        const mdy = mp.y - drag.startValue.y;
+        const sh = drag.startHandles!;
+        next.handles[target.index].in      = clampHandleX(next, target.index,     { x: sh.in.x  + mdx, y: sh.in.y  + mdy });
+        next.handles[target.index + 1].out = clampHandleX(next, target.index + 1, { x: sh.out.x + mdx, y: sh.out.y + mdy });
+      }
       else if (target.type === 'handleOut') next.handles[target.segIndex].out = clampHandleX(next, target.segIndex, newVal);
       else                                  next.handles[target.segIndex].in  = clampHandleX(next, target.segIndex, newVal);
       onChangeRef.current(next);
@@ -258,11 +288,16 @@ export const CurveEditorCanvas: React.FC<Props> = ({
   const gridLines = useMemo(() => {
     const lines: React.ReactElement[] = [];
 
+    // Widen the step when the view spans a huge range, so the line count stays bounded.
+    let step = gridStep;
+    while (Math.max(viewXRange, viewYDisp) / step > MAX_GRID_LINES) step *= 5;
+    if (!Number.isFinite(step)) return lines;
+
     const viewXMax = viewXMin + viewXRange;
-    const iXStart  = Math.floor(viewXMin / gridStep) - 1;
-    const iXEnd    = Math.ceil(viewXMax  / gridStep) + 1;
+    const iXStart  = Math.floor(viewXMin / step) - 1;
+    const iXEnd    = Math.ceil(viewXMax  / step) + 1;
     for (let i = iXStart; i <= iXEnd; i++) {
-      const t = i * gridStep;
+      const t = i * step;
       if (Math.abs(t) < 0.001) continue; // x=0 → white, rendered separately
       const svgX = toSvg({ x: t, y: 0 }).x;
       const isInt = Math.abs(t - Math.round(t)) < 0.001;
@@ -273,10 +308,10 @@ export const CurveEditorCanvas: React.FC<Props> = ({
     }
 
     const viewYMax = viewYMin + viewYDisp;
-    const iYStart  = Math.floor(viewYMin / gridStep) - 1;
-    const iYEnd    = Math.ceil(viewYMax  / gridStep) + 1;
+    const iYStart  = Math.floor(viewYMin / step) - 1;
+    const iYEnd    = Math.ceil(viewYMax  / step) + 1;
     for (let i = iYStart; i <= iYEnd; i++) {
-      const t = i * gridStep;
+      const t = i * step;
       if (Math.abs(t) < 0.001) continue; // y=0 → white, rendered separately
       const svgY = toSvg({ x: 0, y: t }).y;
       const isInt = Math.abs(t - Math.round(t)) < 0.001;

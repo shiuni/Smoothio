@@ -4,6 +4,7 @@ declare global {
     __adobe_cep__?: {
       evalScript(s: string, cb: (r: string) => void): void;
       requestOpenExtension?(id: string, params: string): void;
+      getHostEnvironment?(): string;
     };
   }
 }
@@ -24,6 +25,14 @@ function getCS() {
 
 export function isInCEP(): boolean {
   return !!(window.CSInterface || window.__adobe_cep__);
+}
+
+/** The host app's UI locale (e.g. "ja_JP"), or '' outside CEP. */
+export function getHostLocale(): string {
+  try {
+    const raw = window.__adobe_cep__?.getHostEnvironment?.();
+    return raw ? String(JSON.parse(raw).appLocale || '') : '';
+  } catch { return ''; }
 }
 
 /** Open another extension from this bundle (e.g. the Settings window). */

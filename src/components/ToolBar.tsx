@@ -1,4 +1,5 @@
 import React from 'react';
+import { useT } from '../i18n/LanguageContext';
 
 interface Props {
   onAdd: () => void;
@@ -74,34 +75,37 @@ function Icon({ src, rotate, raw }: { src: string; rotate?: number; raw?: boolea
 export const ToolBar: React.FC<Props> = ({
   onAdd, onRemove, onImportEase, onInvert,
   separateDimensions, onToggleSeparateDimensions, onResetEase,
-}) => (
-  <div style={{ display: 'flex', height: 36, background: '#252525', flexShrink: 0 }}>
-    <Btn onClick={onAdd} title="Add midpoint" flex={3}>
-      <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1 }}>+</span>
-    </Btn>
-    <Btn onClick={onRemove} title="Remove midpoint" flex={3}>
-      <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1 }}>−</span>
-    </Btn>
-    <Btn onClick={onImportEase} title="Import Ease from selected keyframes" flex={2}>
-      <Icon src="icons/inport-ease.svg" rotate={-90} />
-    </Btn>
-    <Btn onClick={onInvert} title="Invert Graph" flex={2}>
-      <Icon src="icons/invert.svg" />
-    </Btn>
-    <Btn
-      onClick={onToggleSeparateDimensions}
-      title={separateDimensions ? 'Separate Dimensions (ON)' : 'Combine Dimensions'}
-      flex={2}
-      active={separateDimensions}
-    >
-      {/* raw=true: these SVGs have built-in colors, don't invert */}
-      <Icon
-        src={separateDimensions ? 'icons/Separate Dimensions.svg' : 'icons/Combine Dimensions.svg'}
-        raw={true}
-      />
-    </Btn>
-    <Btn onClick={onResetEase} title="Reset Ease to Linear" flex={2}>
-      <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1 }}>0</span>
-    </Btn>
-  </div>
-);
+}) => {
+  const t = useT();
+  return (
+    <div style={{ display: 'flex', height: 36, background: '#252525', flexShrink: 0 }}>
+      <Btn onClick={onAdd} title={t.addMidpoint} flex={3}>
+        <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1 }}>+</span>
+      </Btn>
+      <Btn onClick={onRemove} title={t.removeMidpoint} flex={3}>
+        <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1 }}>−</span>
+      </Btn>
+      <Btn onClick={onImportEase} title={t.importEase} flex={2}>
+        <Icon src="icons/inport-ease.svg" rotate={-90} />
+      </Btn>
+      <Btn onClick={onInvert} title={t.invertGraph} flex={2}>
+        <Icon src="icons/invert.svg" />
+      </Btn>
+      <Btn
+        onClick={onToggleSeparateDimensions}
+        title={separateDimensions ? t.separateDimensionsOn : t.combineDimensions}
+        flex={2}
+        active={separateDimensions}
+      >
+        {/* raw=true: these SVGs have built-in colors, don't invert */}
+        <Icon
+          src={separateDimensions ? 'icons/Separate Dimensions.svg' : 'icons/Combine Dimensions.svg'}
+          raw={true}
+        />
+      </Btn>
+      <Btn onClick={onResetEase} title={t.resetEase} flex={2}>
+        <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1 }}>0</span>
+      </Btn>
+    </div>
+  );
+};

@@ -1,15 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppSettings, UILayout } from '../types';
 import { getDefaultSaveLocation, readSettingsFile, writeSettingsFile } from '../utils/fileUtils';
-
-const LAYOUT_OPTIONS: { value: UILayout; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'vertical', label: 'Vertical' },
-  { value: 'horizontal', label: 'Horizontal' },
-];
+import { LanguageContext, defaultLang, resolveLang } from '../i18n/LanguageContext';
+import { LANGS, LANG_NAMES, STRINGS } from '../i18n/strings';
+import type { Lang } from '../i18n/strings';
 
 function defaultSettings(): AppSettings {
-  return { presetSize: 60, presetSaveLocation: getDefaultSaveLocation(), uiLayout: 'auto' };
+  return { language: defaultLang(), presetSize: 60, presetSaveLocation: getDefaultSaveLocation(), uiLayout: 'auto' };
 }
 
 /**
@@ -20,19 +17,44 @@ function defaultSettings(): AppSettings {
 export const SettingsApp: React.FC = () => {
   const [local, setLocal] = useState<AppSettings>(() => {
     const f = readSettingsFile();
-    return f ? { ...defaultSettings(), ...f.settings } : defaultSettings();
+    return f ? { ...defaultSettings(), ...f.settings, language: resolveLang(f.settings.language) } : defaultSettings();
   });
+  const t = STRINGS[local.language];
+  const layoutOptions: { value: UILayout; label: string }[] = [
+    { value: 'auto', label: t.layoutAuto },
+    { value: 'vertical', label: t.layoutVertical },
+    { value: 'horizontal', label: t.layoutHorizontal },
+  ];
+
+  useEffect(() => { document.title = t.settingsWindowTitle; }, [t]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const writeTimer = useRef<number | null>(null);
+  const pending = useRef<AppSettings | null>(null);
 
   // Debounced persist of plain settings (no command).
   const persist = (next: AppSettings) => {
     setLocal(next);
+    pending.current = next;
     if (writeTimer.current !== null) window.clearTimeout(writeTimer.current);
-    writeTimer.current = window.setTimeout(() => writeSettingsFile(next, null), 120);
+    writeTimer.current = window.setTimeout(flush, 120);
   };
 
-  useEffect(() => () => { if (writeTimer.current !== null) window.clearTimeout(writeTimer.current); }, []);
+  // Write a change still waiting on the debounce now — closing the window
+  // within the debounce would otherwise drop it.
+  const flush = () => {
+    if (writeTimer.current !== null) { window.clearTimeout(writeTimer.current); writeTimer.current = null; }
+    if (pending.current) { writeSettingsFile(pending.current, null); pending.current = null; }
+  };
+
+  const close = () => {
+    flush();
+    try { window.close(); } catch { /**/ }
+  };
+
+  useEffect(() => {
+    window.addEventListener('beforeunload', flush);
+    return () => { window.removeEventListener('beforeunload', flush); flush(); };
+  }, []);
 
   // Esc closes the window, matching the Close button. Settings are already
   // persisted on change, so nothing is lost. While the delete confirmation is
@@ -41,23 +63,39 @@ export const SettingsApp: React.FC = () => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (confirmDelete) { setConfirmDelete(false); return; }
-      try { window.close(); } catch { /**/ }
+      close();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [confirmDelete]);
 
   const sendDeleteAll = () => {
+    flush(); // a later debounced write would clear the command before the panel sees it
     writeSettingsFile(local, 'deleteAllPresets');
     setConfirmDelete(false);
   };
 
   return (
+    <LanguageContext.Provider value={t}>
     <div style={page}>
+      {/* Language */}
+      <div style={{ marginBottom: 24 }}>
+        <label style={{ color: '#ccc', fontSize: 14, display: 'block', marginBottom: 8 }}>
+          {t.language}
+        </label>
+        <select
+          value={local.language}
+          onChange={e => persist({ ...local, language: e.target.value as Lang })}
+          style={langSelect}
+        >
+          {LANGS.map(l => <option key={l} value={l}>{LANG_NAMES[l]}</option>)}
+        </select>
+      </div>
+
       {/* Preset Size */}
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-          <label style={{ color: '#ccc', fontSize: 14 }}>Preset Size</label>
+          <label style={{ color: '#ccc', fontSize: 14 }}>{t.presetSize}</label>
           <span style={{ color: '#888', fontSize: 12 }}>{local.presetSize}px</span>
         </div>
         <input
@@ -70,7 +108,7 @@ export const SettingsApp: React.FC = () => {
       {/* Preset Save Location */}
       <div style={{ marginBottom: 24 }}>
         <label style={{ color: '#ccc', fontSize: 14, display: 'block', marginBottom: 8 }}>
-          Preset Save Location
+          {t.presetSaveLocation}
         </label>
         <input
           type="text"
@@ -88,10 +126,10 @@ export const SettingsApp: React.FC = () => {
       {/* UI Layout */}
       <div style={{ marginBottom: 24 }}>
         <label style={{ color: '#ccc', fontSize: 14, display: 'block', marginBottom: 8 }}>
-          UI Layout
+          {t.uiLayout}
         </label>
         <div style={{ display: 'flex', gap: 4 }}>
-          {LAYOUT_OPTIONS.map(opt => {
+          {layoutOptions.map(opt => {
             const active = local.uiLayout === opt.value;
             return (
               <button
@@ -113,7 +151,7 @@ export const SettingsApp: React.FC = () => {
           })}
         </div>
         <div style={{ color: '#666', fontSize: 11, marginTop: 6 }}>
-          Auto: switch by window shape · Vertical / Horizontal: force a layout
+          {t.layoutHint}
         </div>
       </div>
 
@@ -124,18 +162,18 @@ export const SettingsApp: React.FC = () => {
         {confirmDelete ? (
           <>
             <span style={{ color: '#ff4444', fontSize: 13, flex: 1 }}>
-              Are you sure? This cannot be undone.
+              {t.confirmDeleteAll}
             </span>
-            <button onClick={sendDeleteAll} style={{ ...actionBtn, background: '#cc2222' }}>Yes, Delete</button>
-            <button onClick={() => setConfirmDelete(false)} style={{ ...actionBtn, background: '#333' }}>Cancel</button>
+            <button onClick={sendDeleteAll} style={{ ...actionBtn, background: '#cc2222' }}>{t.yesDelete}</button>
+            <button onClick={() => setConfirmDelete(false)} style={{ ...actionBtn, background: '#333' }}>{t.cancel}</button>
           </>
         ) : (
           <>
             <button onClick={() => setConfirmDelete(true)} style={{ ...actionBtn, background: '#cc2222' }}>
-              Delete All Presets
+              {t.deleteAllPresets}
             </button>
             <button onClick={() => persist(defaultSettings())} style={{ ...actionBtn, background: '#cc2222' }}>
-              Reset All Preferences
+              {t.resetAllPreferences}
             </button>
           </>
         )}
@@ -143,13 +181,14 @@ export const SettingsApp: React.FC = () => {
 
       <div style={{ display: 'flex', justifyContent: 'center' }}>
         <button
-          onClick={() => { try { window.close(); } catch { /**/ } }}
+          onClick={close}
           style={{ ...actionBtn, background: '#2a2a2a', padding: '7px 36px' }}
         >
-          Close
+          {t.close}
         </button>
       </div>
     </div>
+    </LanguageContext.Provider>
   );
 };
 
@@ -161,6 +200,11 @@ const page: React.CSSProperties = {
   color: '#e0e0e0',
   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   fontSize: 13,
+};
+
+const langSelect: React.CSSProperties = {
+  width: 160, background: '#1a1a1a', border: '1px solid #333', borderRadius: 3,
+  color: '#ccc', padding: '5px 8px', fontSize: 12, outline: 'none',
 };
 
 const actionBtn: React.CSSProperties = {

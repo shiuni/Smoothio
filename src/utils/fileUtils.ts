@@ -1,5 +1,6 @@
 import { AppSettings, ExportedPresets, ImportMode, Preset } from '../types';
 import { callHost, isInCEP } from './cepBridge';
+import { isValidCurve, sanitizeCurve } from './curveUtils';
 
 declare function require(mod: string): unknown;
 
@@ -56,22 +57,45 @@ export function savePresetsToFile(
 }
 
 /** Write current presets to the canonical User Presets location. */
-export function autoSaveToCanonical(presets: Preset[]): void {
-  savePresetsToFile(presets, getCanonicalPresetsPath());
+export function autoSaveToCanonical(presets: Preset[]): { ok: boolean; error?: string } {
+  return savePresetsToFile(presets, getCanonicalPresetsPath());
+}
+
+/**
+ * Keep only presets with a usable name and curve, filling in missing bookkeeping
+ * fields. One malformed entry used to reach the preset grid and throw while
+ * drawing its card, blanking the whole panel — on every launch once autosaved.
+ */
+export function normalizePresets(list: unknown[]): { presets: Preset[]; dropped: number } {
+  const presets: Preset[] = [];
+  for (const item of list) {
+    const p = item as Partial<Preset> | null;
+    if (!p || typeof p !== 'object' || typeof p.name !== 'string' || !isValidCurve(p.curve)) continue;
+    presets.push({
+      id: typeof p.id === 'string' && p.id ? p.id : newPresetId(),
+      name: p.name,
+      curve: sanitizeCurve(p.curve),
+      createdAt: Number.isFinite(p.createdAt) ? p.createdAt! : Date.now(),
+      order: Number.isFinite(p.order) ? p.order! : presets.length,
+    });
+  }
+  return { presets, dropped: list.length - presets.length };
 }
 
 export function loadPresetsFromFile(
   filePath: string,
-): { ok: boolean; data?: ExportedPresets; error?: string } {
+): { ok: boolean; data?: ExportedPresets; dropped?: number; error?: string } {
   const fs = getFs();
   if (!fs) return { ok: false, error: 'Node.js not available' };
   try {
     const raw = fs.readFileSync(filePath, 'utf-8');
     const data = JSON.parse(raw) as ExportedPresets;
-    if (!data.version || !Array.isArray(data.presets)) {
+    if (!data || !data.version || !Array.isArray(data.presets)) {
       return { ok: false, error: 'Invalid format' };
     }
-    return { ok: true, data };
+    const { presets, dropped } = normalizePresets(data.presets);
+    if (presets.length === 0 && dropped > 0) return { ok: false, error: 'No valid presets' };
+    return { ok: true, data: { version: data.version, presets }, dropped };
   } catch (e) {
     return { ok: false, error: String(e) };
   }

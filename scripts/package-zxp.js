@@ -43,7 +43,6 @@ const INCLUDE = [
   'host',
   'icons',
   'index.html',
-  'popout.html',
   'settings.html',
   'LICENSE',
 ]

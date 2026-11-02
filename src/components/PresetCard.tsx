@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Preset } from '../types';
 import { buildSvgPath } from '../utils/curveUtils';
+import { useT } from '../i18n/LanguageContext';
 
 interface Props {
   preset: Preset;
@@ -15,6 +16,7 @@ interface Props {
 export const PresetCard = React.forwardRef<HTMLDivElement, Props>(({
   preset, size, onClick, isAltHeld, isDragging, onPointerDown, onCardMouseEnter,
 }, ref) => {
+  const t = useT();
   const [hovered, setHovered] = useState(false);
 
   const w = size;
@@ -86,7 +88,7 @@ export const PresetCard = React.forwardRef<HTMLDivElement, Props>(({
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             borderRadius: 3,
           }}>
-            <img src="icons/trash.svg" alt="Delete" style={{ width: 24, height: 24, filter: 'invert(1)' }} />
+            <img src="icons/trash.svg" alt={t.deletePreset} style={{ width: 24, height: 24, filter: 'invert(1)' }} />
           </div>
         )}
       </div>

@@ -80,6 +80,21 @@ function valueDiff(va, vb) {
   return 1;
 }
 
+// Index of the dimension that changes the most between two multi-dim values.
+function dominantDim(va, vb) {
+  var best = 0, bestAbs = -1;
+  for (var i = 0; i < va.length; i++) {
+    var a = Math.abs(vb[i] - va[i]);
+    if (a > bestAbs) { bestAbs = a; best = i; }
+  }
+  return best;
+}
+
+// Signed change between two values along dimension `d` (d < 0: whole value).
+function diffOn(va, vb, d) {
+  return (d < 0) ? valueDiff(va, vb) : vb[d] - va[d];
+}
+
 // lerpValue supports t outside [0,1] for overshoot extrapolation
 function lerpValue(vA, vB, t) {
   if (typeof vA === 'number') return vA + (vB - vA) * t;
@@ -105,14 +120,14 @@ function curveHasOvershoot(handles, midPts) {
   for (var hi = 0; hi < handles.length; hi++) {
     var segA = guiAnchors[hi], segB = guiAnchors[hi + 1];
     var sdy = segB.y - segA.y;
-    var loy, liy;
     if (Math.abs(sdy) < 1e-10) {
-      loy = handles[hi].out.y;
-      liy = handles[hi]['in'].y;
-    } else {
-      loy = (handles[hi].out.y - segA.y) / sdy;
-      liy = (handles[hi]['in'].y - segA.y) / sdy;
+      // Flat segment: any handle off the anchors' height is a bump past them.
+      if (Math.abs(handles[hi].out.y - segA.y) > 0.001 ||
+          Math.abs(handles[hi]['in'].y - segA.y) > 0.001) return true;
+      continue;
     }
+    var loy = (handles[hi].out.y - segA.y) / sdy;
+    var liy = (handles[hi]['in'].y - segA.y) / sdy;
     if (loy > 1.001 || loy < -0.001 || liy > 1.001 || liy < -0.001) return true;
   }
   return false;
@@ -168,36 +183,56 @@ function setKeySide(prop, k, side, type, eases) {
   } catch (e) {}
 }
 
+// A handle closer than this (graph units) to the straight line between its
+// segment's anchors counts as linear. The graph and text boxes resolve 0.01, so
+// 0.009 and below is treated as straight and 0.01 is kept as a curve.
+var LINEAR_TOL = 0.0095;
+
 // Apply ease to one keyframe segment [kA, kB].
 // segA, segB: this ease-segment's anchor positions in global [0,1] canvas space.
 // Handles are in global space and get transformed to segment-local space here.
 // For non-spatial multi-dim properties (e.g. Scale), builds per-dimension ease arrays.
-function applySegment(prop, kA, kB, handle, segA, segB) {
+// flatDv (optional): the whole curve's value change (number, or per-dimension
+// array). A flat segment (equal anchor heights) has no value range of its own,
+// so a bump drawn on it is scaled by this instead of being flattened.
+function applySegment(prop, kA, kB, handle, segA, segB, flatDv) {
   if (!segA) segA = { x: 0, y: 0 };
   if (!segB) segB = { x: 1, y: 1 };
 
   var dt = prop.keyTime(kB) - prop.keyTime(kA);
   if (dt <= 0) return;
 
-  // Transform global handle coords → segment-local [0,1] space
   var sdx = segB.x - segA.x;
   var sdy = segB.y - segA.y;
+  var flat = Math.abs(sdy) < 1e-10;
+  var useFlatDv = flat && flatDv !== undefined && flatDv !== null;
+
+  // Linear ease: both handles lie on the line between the anchors → LINEAR
+  var slope = (Math.abs(sdx) < 1e-10) ? 0 : sdy / sdx;
+  var devOut = Math.abs((handle.out.y   - segA.y) - (handle.out.x   - segA.x) * slope);
+  var devIn  = Math.abs((handle['in'].y - segA.y) - (handle['in'].x - segA.x) * slope);
+  if (devOut < LINEAR_TOL && devIn < LINEAR_TOL) {
+    setKeySide(prop, kA, 'out', KeyframeInterpolationType.LINEAR, null);
+    setKeySide(prop, kB, 'in',  KeyframeInterpolationType.LINEAR, null);
+    return;
+  }
+
+  // Transform global handle coords → segment-local [0,1] space
   var lox, loy, lix, liy;
-  if (Math.abs(sdx) < 1e-10 || Math.abs(sdy) < 1e-10) {
+  if (Math.abs(sdx) < 1e-10 || (flat && !useFlatDv)) {
     lox = handle.out.x;   loy = handle.out.y;
     lix = handle['in'].x; liy = handle['in'].y;
+  } else if (useFlatDv) {
+    // Heights stay in graph units; flatDv supplies the value scale below.
+    lox = (handle.out.x   - segA.x) / sdx;
+    loy = handle.out.y - segA.y;
+    lix = (handle['in'].x - segA.x) / sdx;
+    liy = 1 - (segB.y - handle['in'].y);
   } else {
     lox = (handle.out.x   - segA.x) / sdx;
     loy = (handle.out.y   - segA.y) / sdy;
     lix = (handle['in'].x - segA.x) / sdx;
     liy = (handle['in'].y - segA.y) / sdy;
-  }
-
-  // Linear ease: handles lie on the diagonal (loy≈lox, liy≈lix) → use LINEAR interpolation
-  if (Math.abs(loy - lox) < 0.02 && Math.abs(liy - lix) < 0.02) {
-    setKeySide(prop, kA, 'out', KeyframeInterpolationType.LINEAR, null);
-    setKeySide(prop, kB, 'in',  KeyframeInterpolationType.LINEAR, null);
-    return;
   }
 
   var vA = prop.keyValue(kA);
@@ -210,6 +245,9 @@ function applySegment(prop, kA, kB, handle, segA, segB) {
   if (!isMultiDim || isSpatial) {
     // 1D scalar or spatial (single ease covers all dimensions)
     var dv = valueDiff(vA, vB);
+    // A spatial speed is a magnitude along the motion path, so a bump between
+    // two equal positions can't be expressed; it stays flat.
+    if (useFlatDv && !isSpatial) dv = (typeof flatDv === 'number') ? flatDv : flatDv[0];
     // Spatial speed is the velocity magnitude along the motion path; AE
     // clamps negative speeds to 0 on spatial properties, which froze the
     // start handle whenever the position moved in the negative direction.
@@ -221,7 +259,7 @@ function applySegment(prop, kA, kB, handle, segA, segB) {
   } else {
     // Non-spatial multi-dim (e.g. Scale): one KeyframeEase per dimension
     for (var d = 0; d < vA.length; d++) {
-      var dv_d = vB[d] - vA[d];
+      var dv_d = useFlatDv ? flatDv[d] : vB[d] - vA[d];
       var pair_d = computeEasePair(lox, loy, lix, liy, dv_d, dt);
       outEases.push(pair_d.easeOut);
       inEases.push(pair_d.easeIn);
@@ -232,11 +270,17 @@ function applySegment(prop, kA, kB, handle, segA, segB) {
   setKeySide(prop, kB, 'in',  KeyframeInterpolationType.BEZIER, inEases);
 }
 
+// Midpoint keys closer than this (seconds) to a neighbouring key would be
+// indistinguishable from it when keys are re-found by time (findKeyAtTime).
+var MIN_KEY_GAP = 0.002;
+
 // Insert midpoint keyframes between kA and kB, then apply ease per sub-segment.
+// Returns false (and changes nothing) when the span is too short to fit the
+// midpoints as separate keys.
 function applyFullCurveToSegment(prop, kA, kB, midPoints, handles) {
   if (!midPoints || midPoints.length === 0) {
     applySegment(prop, kA, kB, handles[0], { x: 0, y: 0 }, { x: 1, y: 1 });
-    return;
+    return true;
   }
 
   var tA = prop.keyTime(kA);
@@ -245,20 +289,29 @@ function applyFullCurveToSegment(prop, kA, kB, midPoints, handles) {
   var vB = prop.keyValue(kB);
   var dt = tB - tA;
 
-  var sorted = midPoints.slice(0).sort(function(a, b) { return a.x - b.x; });
-
-  // Insert midpoint keyframes
+  // Midpoints arrive validated: strictly inside (0,1) and in time order.
   var midTimes = [];
-  for (var m = 0; m < sorted.length; m++) {
-    var t = tA + dt * sorted[m].x;
-    var v = lerpValue(vA, vB, sorted[m].y);
-    try { prop.setValueAtTime(t, v); } catch (e) {}
+  var prevT = tA;
+  for (var m = 0; m < midPoints.length; m++) {
+    var t = tA + dt * midPoints[m].x;
+    if (t - prevT < MIN_KEY_GAP) return false;
     midTimes.push(t);
+    prevT = t;
   }
+  if (tB - prevT < MIN_KEY_GAP) return false;
+
+  for (var mi = 0; mi < midPoints.length; mi++) {
+    try { prop.setValueAtTime(midTimes[mi], lerpValue(vA, vB, midPoints[mi].y)); } catch (e) {}
+  }
+
+  // Whole-curve value change, for scaling bumps on flat sub-segments
+  var flatDv;
+  if (typeof vA === 'number') flatDv = vB - vA;
+  else { flatDv = []; for (var fd = 0; fd < vA.length; fd++) flatDv.push(vB[fd] - vA[fd]); }
 
   // GUI anchors for coordinate transform
   var guiAnchors = [{ x: 0, y: 0 }];
-  for (var ma = 0; ma < sorted.length; ma++) guiAnchors.push({ x: sorted[ma].x, y: sorted[ma].y });
+  for (var ma = 0; ma < midPoints.length; ma++) guiAnchors.push({ x: midPoints[ma].x, y: midPoints[ma].y });
   guiAnchors.push({ x: 1, y: 1 });
 
   var allTimes = [tA].concat(midTimes).concat([tB]);
@@ -269,11 +322,13 @@ function applyFullCurveToSegment(prop, kA, kB, midPoints, handles) {
     var k2 = findKeyAtTime(prop, allTimes[s + 1]);
     if (k1 < 0 || k2 < 0) continue;
     var h = handles[Math.min(s, handles.length - 1)];
-    applySegment(prop, k1, k2, h, guiAnchors[s], guiAnchors[s + 1]);
+    applySegment(prop, k1, k2, h, guiAnchors[s], guiAnchors[s + 1], flatDv);
   }
+  return true;
 }
 
 // Apply the full curve to a sequence of key index pairs.
+// Returns false when nothing could be applied (every span too short for the midpoints).
 function applyToKeys(prop, keyIdxArr, midPoints, handles) {
   var indices = keyIdxArr.slice(0);
   if (indices.length === 1 && indices[0] < prop.numKeys) {
@@ -300,18 +355,45 @@ function applyToKeys(prop, keyIdxArr, midPoints, handles) {
       applySegment(prop, kA, kB, handles[si], guiAnchors[si], guiAnchors[si + 1]);
       shift1 += (prop.numKeys - before1);
     }
-  } else {
-    // Insert midpoint keyframes, track index shift
-    var shift2 = 0;
-    for (var j = 0; j < numPairs; j++) {
-      var kAj = indices[j] + shift2;
-      var kBj = indices[j + 1] + shift2;
-      if (kAj < 1 || kBj > prop.numKeys) continue;
-      var before2 = prop.numKeys;
-      applyFullCurveToSegment(prop, kAj, kBj, midPoints, handles);
-      shift2 += (prop.numKeys - before2);
+    return true;
+  }
+
+  // Insert midpoint keyframes, track index shift
+  var applied = false;
+  var shift2 = 0;
+  for (var j = 0; j < numPairs; j++) {
+    var kAj = indices[j] + shift2;
+    var kBj = indices[j + 1] + shift2;
+    if (kAj < 1 || kBj > prop.numKeys) continue;
+    var before2 = prop.numKeys;
+    if (applyFullCurveToSegment(prop, kAj, kBj, midPoints, handles)) applied = true;
+    shift2 += (prop.numKeys - before2);
+  }
+  return applied;
+}
+
+// Midpoints become keyframe times, so they must sit strictly between the start
+// and end and in time order — otherwise a midpoint key lands on (and overwrites)
+// the start/end key, or before/after the selected range. Returns an error
+// message, or null when the curve is usable.
+function validateCurve(handles, midPts) {
+  if (handles.length !== midPts.length + 1) return 'Curve data is inconsistent';
+  var prevX = 0;
+  for (var m = 0; m < midPts.length; m++) {
+    var p = midPts[m];
+    if (!p || typeof p.x !== 'number' || typeof p.y !== 'number' || !isFinite(p.x) || !isFinite(p.y)) {
+      return 'Curve contains invalid numbers';
+    }
+    if (p.x <= prevX || p.x >= 1) return 'Midpoints must lie between the start and end, in time order';
+    prevX = p.x;
+  }
+  for (var h = 0; h < handles.length; h++) {
+    var o = handles[h] && handles[h].out, i = handles[h] && handles[h]['in'];
+    if (!o || !i || !isFinite(o.x) || !isFinite(o.y) || !isFinite(i.x) || !isFinite(i.y)) {
+      return 'Curve contains invalid numbers';
     }
   }
+  return null;
 }
 
 // Snapshot every existing segment ease on `prop` as a normalized handle (one entry
@@ -329,8 +411,10 @@ function snapshotSegmentEases(prop) {
       var dt = tB - tA;
       if (dt <= 0) continue;
 
-      var isLinear = (prop.keyOutInterpolationType(kA) === KeyframeInterpolationType.LINEAR &&
-                      prop.keyInInterpolationType(kB)  === KeyframeInterpolationType.LINEAR);
+      // Each side's interpolation type is kept separately, so HOLD and
+      // half-linear segments come back as they were rather than as BEZIER.
+      var outType = prop.keyOutInterpolationType(kA);
+      var inType  = prop.keyInInterpolationType(kB);
 
       var dv = valueDiff(prop.keyValue(kA), prop.keyValue(kB));
       if (Math.abs(dv) < 1e-6) dv = 1;
@@ -346,21 +430,30 @@ function snapshotSegmentEases(prop) {
 
       var handle = { out: { x: outX, y: outY } };
       handle['in'] = { x: inX, y: inY };
-      segs.push({ tA: tA, tB: tB, handle: handle, linear: isLinear });
+      segs.push({ tA: tA, tB: tB, handle: handle, outType: outType, inType: inType });
     } catch (e) {}
   }
   return segs;
 }
 
 // Re-apply snapshotted segment eases onto `prop` (e.g. a separation follower),
-// matching segments by keyframe time. Linear segments are left as-is.
+// matching segments by keyframe time. Fully linear segments are left as-is.
+// Curved sides get their ease back first (that writes both sides as BEZIER);
+// LINEAR / HOLD sides are then set by type alone, keeping the restored ease.
 function restoreSegmentEases(prop, segs) {
+  var LIN = KeyframeInterpolationType.LINEAR;
+  var BEZ = KeyframeInterpolationType.BEZIER;
   for (var s = 0; s < segs.length; s++) {
-    if (segs[s].linear) continue;
-    var kA = findKeyAtTime(prop, segs[s].tA);
-    var kB = findKeyAtTime(prop, segs[s].tB);
+    var sg = segs[s];
+    if (sg.outType === LIN && sg.inType === LIN) continue;
+    var kA = findKeyAtTime(prop, sg.tA);
+    var kB = findKeyAtTime(prop, sg.tB);
     if (kA < 0 || kB < 0) continue;
-    applySegment(prop, kA, kB, segs[s].handle, { x: 0, y: 0 }, { x: 1, y: 1 });
+    if (sg.outType === BEZ || sg.inType === BEZ) {
+      applySegment(prop, kA, kB, sg.handle, { x: 0, y: 0 }, { x: 1, y: 1 });
+    }
+    if (sg.outType !== BEZ) setKeySide(prop, kA, 'out', sg.outType, null);
+    if (sg.inType  !== BEZ) setKeySide(prop, kB, 'in',  sg.inType,  null);
   }
 }
 
@@ -377,11 +470,14 @@ function smoothio_applyEasing(curveData, separateDim) {
   var handles  = curve.handles   || [];
   var midPts   = curve.midPoints || [];
   if (!handles.length) return err('Empty curve');
+  var curveError = validateCurve(handles, midPts);
+  if (curveError) return err(curveError);
 
   var hasOvershoot = curveHasOvershoot(handles, midPts);
 
   app.beginUndoGroup('Smoothio: Apply Easing');
   var count = 0;
+  var tooShort = 0;
 
   try {
     for (var li = 0; li < comp.selectedLayers.length; li++) {
@@ -415,10 +511,12 @@ function smoothio_applyEasing(curveData, separateDim) {
         for (var z = 0; z < keysForProp.length; z++) times.push(prop.keyTime(keysForProp[z]));
 
         // Decide separation for this target. Only a currently-combined multi-dim
-        // property can be separated (skips 1D props and existing followers).
+        // property can be separated (skips 1D props and existing followers), and
+        // only a separation leader (Position) supports it at all — Scale doesn't.
         var wantSep = false, dims = 0, canSep = false;
         try {
-          canSep = (prop.dimensionsSeparated === false) &&
+          canSep = (prop.isSeparationLeader === true) &&
+                   (prop.dimensionsSeparated === false) &&
                    (typeof prop.value === 'object') && prop.value && prop.value.length >= 2;
         } catch (eC) {}
         if (canSep) {
@@ -447,7 +545,9 @@ function smoothio_applyEasing(curveData, separateDim) {
       for (var ti2 = 0; ti2 < targets.length; ti2++) {
         var tg = targets[ti2];
         var leaves = [];
-        if (tg.sep && tg.prop.dimensionsSeparated) {
+        var separated = false;
+        try { separated = tg.sep && tg.prop.dimensionsSeparated; } catch (eD) {}
+        if (separated) {
           for (var d = 0; d < tg.dims; d++) {
             var f = null;
             try { f = tg.prop.getSeparationFollower(d); } catch (eF) {}
@@ -461,16 +561,17 @@ function smoothio_applyEasing(curveData, separateDim) {
           var leaf = leaves[lf];
           // Restore the pre-separation eases that separation flattened, then apply
           // the new ease only to the selected range (it overwrites those segments).
-          if (tg.sep && tg.snap) restoreSegmentEases(leaf, tg.snap);
+          if (separated && tg.snap) restoreSegmentEases(leaf, tg.snap);
           var keyIdx = keysAtTimes(leaf, tg.times);
           if (keyIdx.length === 0) continue;
-          applyToKeys(leaf, keyIdx, midPts, handles);
-          count++;
+          if (applyToKeys(leaf, keyIdx, midPts, handles)) count++;
+          else tooShort++;
         }
       }
     }
 
     app.endUndoGroup();
+    if (count === 0 && tooShort > 0) return err('Keyframes are too close together for the midpoints');
     if (count === 0) return err('Nothing to apply — select a layer or keyframes');
     return ok();
   } catch (e) {
@@ -565,17 +666,25 @@ function smoothio_importEase() {
   // the global→local transform applySegment applies. Without this mapping, a
   // multi-segment (3+ point) ease imported its handles in the wrong space, so
   // only single-segment (2-point) eases came back correctly. (Issue #3)
+  //
+  // Non-spatial multi-dim properties (Scale) are eased per dimension: each
+  // dimension's speed is scaled by that dimension's own change (applySegment).
+  // So read one dimension's ease against that same dimension's change — the one
+  // changing the most. Dividing dimension 0's speed by the whole vector's length
+  // shrank the handles (×0.71 even for a uniform 100→200 scale).
   var tA0 = prop.keyTime(sk[0]);
   var tB0 = prop.keyTime(sk[sk.length - 1]);
   var vA0 = prop.keyValue(sk[0]);
   var vB0 = prop.keyValue(sk[sk.length - 1]);
+  var perDim = !isSpatialProp && typeof vA0 === 'object' && vA0 !== null && vA0.length > 1;
+  var dTotal = perDim ? dominantDim(vA0, vB0) : -1;
   var totalDt = tB0 - tA0;
-  var totalDv = valueDiff(vA0, vB0);
+  var totalDv = diffOn(vA0, vB0, dTotal);
 
   var anchors = [{ x: 0, y: 0 }];
   for (var a = 1; a < sk.length - 1; a++) {
     var ax = (totalDt > 0) ? (prop.keyTime(sk[a]) - tA0) / totalDt : 0;
-    var ay = (Math.abs(totalDv) > 1e-6) ? valueDiff(vA0, prop.keyValue(sk[a])) / totalDv : 0.5;
+    var ay = (Math.abs(totalDv) > 1e-6) ? diffOn(vA0, prop.keyValue(sk[a]), dTotal) / totalDv : 0.5;
     anchors.push({ x: ax, y: ay });
   }
   anchors.push({ x: 1, y: 1 });
@@ -586,7 +695,9 @@ function smoothio_importEase() {
     var dt = prop.keyTime(kB) - prop.keyTime(kA);
     if (dt <= 0) continue;
 
-    var dv = valueDiff(prop.keyValue(kA), prop.keyValue(kB));
+    var vKA = prop.keyValue(kA), vKB = prop.keyValue(kB);
+    var dSeg = perDim ? dominantDim(vKA, vKB) : -1;
+    var dv = diffOn(vKA, vKB, dSeg);
     if (Math.abs(dv) < 1e-6) dv = 1;
 
     // Temporal-ease speed is signed for scalar properties (negative while the
@@ -597,7 +708,8 @@ function smoothio_importEase() {
 
     var outArr = prop.keyOutTemporalEase(kA);
     var inArr  = prop.keyInTemporalEase(kB);
-    var eOut = outArr[0], eIn = inArr[0];
+    var eIdx = (dSeg < 0) ? 0 : dSeg;
+    var eOut = outArr[eIdx], eIn = inArr[eIdx];
 
     // Segment-local handle coords (relative to this segment's own [0,1] box)
     var outXl = eOut.influence / 100;

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Preset } from '../types';
 import { PresetCard } from './PresetCard';
+import { useT } from '../i18n/LanguageContext';
 
 const DRAG_THRESHOLD = 6;   // px before drag starts
 const FLIP_DURATION  = 180; // ms for card swap animation
@@ -44,6 +45,7 @@ export const PresetPanel: React.FC<Props> = ({
   onSave, onExport, onImport, onSettings,
   onReorderPresets,
 }) => {
+  const t = useT();
   const [isAltHeld, setIsAltHeld] = useState(false);
   const [dragId,    setDragId]    = useState<string | null>(null);
   const [liveOrder, setLiveOrder] = useState<Preset[] | null>(null);
@@ -148,7 +150,11 @@ export const PresetPanel: React.FC<Props> = ({
       const changed = final.some((p, i) => p.id !== orig[i]?.id);
       if (changed) onReorderPresets(final.map((p, i) => ({ ...p, order: i })));
 
-      didDragRef.current   = true; // suppress the click that follows mouseup
+      // Suppress the click that follows this mouseup. It only fires when the
+      // drop lands on a card, so clear the flag right after; otherwise a drop on
+      // empty space would swallow the next, unrelated click.
+      didDragRef.current   = true;
+      window.setTimeout(() => { didDragRef.current = false; }, 0);
       dragIdRef.current    = null;
       liveOrderRef.current = [];
       setDragId(null);
@@ -200,11 +206,11 @@ export const PresetPanel: React.FC<Props> = ({
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#141414', overflow: 'hidden' }}>
       {/* Action buttons */}
       <div style={{ display: 'flex', gap: 2, padding: '4px 8px', borderBottom: '1px solid #222', flexShrink: 0, justifyContent: 'flex-end' }}>
-        <SvgBtn src="icons/save.svg"   title="Save Preset"    onClick={onSave} />
-        <SvgBtn src="icons/export.svg" title="Export Presets" onClick={onExport} />
-        <SvgBtn src="icons/import.svg" title="Import Presets" onClick={onImport} />
+        <SvgBtn src="icons/save.svg"   title={t.savePreset}    onClick={onSave} />
+        <SvgBtn src="icons/export.svg" title={t.exportPresets} onClick={onExport} />
+        <SvgBtn src="icons/import.svg" title={t.importPresets} onClick={onImport} />
         <button
-          title="Settings"
+          title={t.settings}
           onClick={onSettings}
           style={{ width: 32, height: 32, background: 'transparent', border: 'none', borderRadius: 4, cursor: 'pointer', color: '#ccc', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >

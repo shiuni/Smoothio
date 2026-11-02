@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ImportMode } from '../types';
+import { useT } from '../i18n/LanguageContext';
 
 interface Props {
   fileName: string;
@@ -9,25 +10,13 @@ interface Props {
   onCancel: () => void;
 }
 
-const MODES: { mode: ImportMode; label: string; description: string }[] = [
-  {
-    mode: 'skip',
-    label: 'Skip if Exists',
-    description: 'If there is a conflict with an existing preset, adding that preset will be skipped.',
-  },
-  {
-    mode: 'overwrite',
-    label: 'Overwrite if Exists',
-    description: 'If there is a conflict with an existing preset, that preset will be overwritten.',
-  },
-  {
-    mode: 'overwriteAll',
-    label: 'Overwrite All',
-    description: 'All presets will be overwritten.',
-  },
-];
-
 export const ImportDialog: React.FC<Props> = ({ fileName, presetCount, onImport, onCancel }) => {
+  const t = useT();
+  const MODES: { mode: ImportMode; label: string; description: string }[] = [
+    { mode: 'skip',         label: t.modeSkip,         description: t.modeSkipDesc },
+    { mode: 'overwrite',    label: t.modeOverwrite,    description: t.modeOverwriteDesc },
+    { mode: 'overwriteAll', label: t.modeOverwriteAll, description: t.modeOverwriteAllDesc },
+  ];
   const [selected, setSelected] = useState<ImportMode>('skip');
 
   // Esc dismisses the dialog, wherever the focus happens to be.
@@ -41,13 +30,13 @@ export const ImportDialog: React.FC<Props> = ({ fileName, presetCount, onImport,
     <div style={overlay}>
       <div style={modal}>
         <h2 style={{ color: '#e0e0e0', fontSize: 20, fontWeight: 600, marginBottom: 4 }}>
-          Import Presets
+          {t.importPresets}
         </h2>
         <p style={{ color: '#aaa', fontSize: 12, marginBottom: 4 }}>
-          File: <span style={{ color: '#e0e0e0' }}>{fileName}</span>
+          {t.importFile} <span style={{ color: '#e0e0e0' }}>{fileName}</span>
         </p>
         <p style={{ color: '#aaa', fontSize: 12, marginBottom: 20 }}>
-          Found Presets: <span style={{ color: '#e0e0e0' }}>{presetCount}</span>
+          {t.foundPresets} <span style={{ color: '#e0e0e0' }}>{presetCount}</span>
         </p>
 
         {/* Mode selector — one equal-width segment per mode */}
@@ -100,13 +89,13 @@ export const ImportDialog: React.FC<Props> = ({ fileName, presetCount, onImport,
             onClick={() => onImport(selected)}
             style={{ ...btn, background: '#0077ff', padding: '7px 24px', fontWeight: 600 }}
           >
-            Import
+            {t.import}
           </button>
           <button
             onClick={onCancel}
             style={{ ...btn, background: '#2a2a2a', border: '1px solid #333', color: '#ccc', padding: '7px 20px' }}
           >
-            Cancel
+            {t.cancel}
           </button>
         </div>
       </div>

@@ -1,11 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppSettings, UILayout } from '../types';
-
-const LAYOUT_OPTIONS: { value: UILayout; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'vertical', label: 'Vertical' },
-  { value: 'horizontal', label: 'Horizontal' },
-];
+import { LANGS, LANG_NAMES, STRINGS } from '../i18n/strings';
+import type { Lang } from '../i18n/strings';
 
 interface Props {
   settings: AppSettings;
@@ -24,6 +20,13 @@ export const SettingsDialog: React.FC<Props> = ({
 }) => {
   const [local, setLocal] = useState<AppSettings>({ ...settings });
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Follow the language being picked here, before it is saved.
+  const t = STRINGS[local.language];
+  const layoutOptions: { value: UILayout; label: string }[] = [
+    { value: 'auto', label: t.layoutAuto },
+    { value: 'vertical', label: t.layoutVertical },
+    { value: 'horizontal', label: t.layoutHorizontal },
+  ];
 
   const handleSave = () => {
     onSave(local);
@@ -50,13 +53,27 @@ export const SettingsDialog: React.FC<Props> = ({
       <div style={modal}>
         <h2 style={{ color: '#e0e0e0', fontSize: 20, fontWeight: 600, marginBottom: 24,
           display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 20 }}>⚙</span> Setting
+          <span style={{ fontSize: 20 }}>⚙</span> {t.settingsTitle}
         </h2>
+
+        {/* Language */}
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ color: '#ccc', fontSize: 14, display: 'block', marginBottom: 8 }}>
+            {t.language}
+          </label>
+          <select
+            value={local.language}
+            onChange={e => setLocal({ ...local, language: e.target.value as Lang })}
+            style={langSelect}
+          >
+            {LANGS.map(l => <option key={l} value={l}>{LANG_NAMES[l]}</option>)}
+          </select>
+        </div>
 
         {/* Preset Size */}
         <div style={{ marginBottom: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <label style={{ color: '#ccc', fontSize: 14 }}>Preset Size</label>
+            <label style={{ color: '#ccc', fontSize: 14 }}>{t.presetSize}</label>
             <span style={{ color: '#888', fontSize: 12 }}>{local.presetSize}px</span>
           </div>
           <input
@@ -72,7 +89,7 @@ export const SettingsDialog: React.FC<Props> = ({
         {/* Preset Save Location */}
         <div style={{ marginBottom: 24 }}>
           <label style={{ color: '#ccc', fontSize: 14, display: 'block', marginBottom: 8 }}>
-            Preset Save Location
+            {t.presetSaveLocation}
           </label>
           <input
             type="text"
@@ -97,10 +114,10 @@ export const SettingsDialog: React.FC<Props> = ({
         {/* UI Layout */}
         <div style={{ marginBottom: 24 }}>
           <label style={{ color: '#ccc', fontSize: 14, display: 'block', marginBottom: 8 }}>
-            UI Layout
+            {t.uiLayout}
           </label>
           <div style={{ display: 'flex', gap: 4 }}>
-            {LAYOUT_OPTIONS.map(opt => {
+            {layoutOptions.map(opt => {
               const active = local.uiLayout === opt.value;
               return (
                 <button
@@ -124,7 +141,7 @@ export const SettingsDialog: React.FC<Props> = ({
             })}
           </div>
           <div style={{ color: '#666', fontSize: 11, marginTop: 6 }}>
-            Auto: switch by window shape · Vertical / Horizontal: force a layout
+            {t.layoutHint}
           </div>
         </div>
 
@@ -135,19 +152,19 @@ export const SettingsDialog: React.FC<Props> = ({
           {confirmDelete ? (
             <>
               <span style={{ color: '#ff4444', fontSize: 13, flex: 1 }}>
-                Are you sure? This cannot be undone.
+                {t.confirmDeleteAll}
               </span>
               <button
                 onClick={() => { onDeleteAllPresets(); setConfirmDelete(false); }}
                 style={{ ...actionBtn, background: '#cc2222' }}
               >
-                Yes, Delete
+                {t.yesDelete}
               </button>
               <button
                 onClick={() => setConfirmDelete(false)}
                 style={{ ...actionBtn, background: '#333' }}
               >
-                Cancel
+                {t.cancel}
               </button>
             </>
           ) : (
@@ -156,13 +173,13 @@ export const SettingsDialog: React.FC<Props> = ({
                 onClick={() => setConfirmDelete(true)}
                 style={{ ...actionBtn, background: '#cc2222' }}
               >
-                Delete All Presets
+                {t.deleteAllPresets}
               </button>
               <button
                 onClick={() => setLocal({ ...defaultSettings })}
                 style={{ ...actionBtn, background: '#333' }}
               >
-                Reset All Preferences
+                {t.resetAllPreferences}
               </button>
             </>
           )}
@@ -171,7 +188,7 @@ export const SettingsDialog: React.FC<Props> = ({
         {/* Close */}
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           <button onClick={handleSave} style={{ ...actionBtn, background: '#2a2a2a', padding: '7px 36px' }}>
-            Close
+            {t.close}
           </button>
         </div>
       </div>
@@ -198,6 +215,11 @@ const modal: React.CSSProperties = {
   overflowY: 'auto',
   boxSizing: 'border-box',
   boxShadow: '0 16px 48px rgba(0,0,0,0.8)',
+};
+
+const langSelect: React.CSSProperties = {
+  width: 160, background: '#1a1a1a', border: '1px solid #333', borderRadius: 3,
+  color: '#ccc', padding: '5px 8px', fontSize: 12, outline: 'none',
 };
 
 const actionBtn: React.CSSProperties = {

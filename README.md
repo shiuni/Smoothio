@@ -10,7 +10,7 @@ This is a versatile easing script that can be used in any production, featuring 
 - **Import Ease** reads the easing off the selected keyframes and loads it into the editor, so an ease you like becomes a preset instead of something you rebuild.
 - **Presets** — save a curve, and it appears as a thumbnail you click to apply. Presets are stored as files on disk, and can be exported and imported to move between machines or share with others; import offers merge or overwrite on a name clash.
 - **Separate Dimensions** applies the curve per axis rather than to the property as a whole.
-- **Pop-out editor** opens the curve in its own window when the docked panel is too cramped, and a separate **Settings** window covers preset size, save location, and panel layout (auto, vertical or horizontal).
+- A separate **Settings** window covers the UI language (English or Japanese), preset size, save location, and panel layout (auto, vertical or horizontal).
 
 ## Setup
 
